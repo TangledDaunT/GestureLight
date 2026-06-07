@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="GestureLight — Control your LED lighting with hand gestures using real-time computer vision. Works with ESP32 LED strips via WebSocket." />
+  <meta name="color-scheme" content="dark" />
+  <title>GestureLight — Gesture-Controlled Lighting</title>
+
+  <!-- Prevent FOUC on dark mode -->
+  <script>document.documentElement.setAttribute('data-theme', 'dark');</script>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles/main.css" />
+</head>
+<body>
+
+  <!-- ───────────────────────────────────────────────────
+       LOADING SCREEN
+       Shown while MediaPipe models load and camera starts.
+  ─────────────────────────────────────────────────────── -->
+  <div id="loading-screen" class="loading-screen" role="status" aria-live="polite">
+    <div class="loading-content">
+      <div class="loading-icon" aria-hidden="true">💡</div>
+      <h1 class="loading-title">GestureLight</h1>
+      <p class="loading-subtitle">Initializing vision system…</p>
+      <div class="loading-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+        <div id="loading-progress" class="loading-bar-fill"></div>
+      </div>
+      <p id="loading-status" class="loading-status-text">Loading MediaPipe models…</p>
+    </div>
+  </div>
+
+  <!-- ───────────────────────────────────────────────────
+       MAIN APPLICATION
+       Hidden until initialization completes.
+  ─────────────────────────────────────────────────────── -->
+  <div id="app" class="app hidden" aria-label="GestureLight application">
+
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-brand">
+        <span class="header-icon" aria-hidden="true">💡</span>
+        <div class="header-titles">
+          <h1 class="header-title">GestureLight</h1>
+          <p class="header-subtitle">Gesture-Controlled Lighting</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <div
+          id="global-status-dot"
+          class="status-dot status-dot--connecting"
+          title="Connection status"
+          aria-label="Connection status: connecting"
+          role="img"
+        ></div>
+      </div>
+    </header>
+
+    <!-- Main Grid -->
+    <main class="app-main">
+
+      <!-- ── LEFT COLUMN ──────────────────────────────── -->
+      <div class="column column--left">
+
+        <!-- Camera Preview Card -->
+        <div class="card card--camera" id="card-camera">
+          <div class="card-header">
+            <span class="card-icon" aria-hidden="true">📷</span>
+            <h2 class="card-title">Camera</h2>
+            <span
+              id="tracking-badge"
+              class="badge badge--neutral"
+              role="status"
+              aria-live="polite"
+            >Starting…</span>
+          </div>
+
+          <!-- Preview container: video + canvas overlay -->
+          <div class="camera-preview-container" id="camera-container">
+            <video
+              id="camera-video"
+              class="camera-video"
+              autoplay
+              playsinline
+              muted
+              aria-label="Camera preview"
+            ></video>
+            <canvas
+              id="camera-canvas"
+              class="camera-canvas"
+              aria-hidden="true"
+            ></canvas>
+
+            <!-- Shown when camera is not yet ready -->
+            <div id="camera-message" class="camera-overlay-message hidden">
+              <span class="camera-message-icon" aria-hidden="true">📷</span>
+              <p>Starting camera…</p>
+            </div>
+
+            <!-- Shown when tracking is lost -->
+            <div
+              id="tracking-lost-overlay"
+              class="tracking-overlay tracking-overlay--lost hidden"
+              role="alert"
+              aria-live="assertive"
+            >
+              <div class="tracking-overlay-content">
+                <span class="tracking-overlay-icon" aria-hidden="true">👋</span>
+                <p class="tracking-overlay-title">Tracking Lost</p>
+                <small class="tracking-overlay-hint">Show both hands</small>
+              </div>
+            </div>
+
+            <!-- OFF state overlay -->
+            <div
+              id="lights-off-overlay"
+              class="tracking-overlay tracking-overlay--off hidden"
+              role="status"
+              aria-live="polite"
+            >
+              <div class="tracking-overlay-content">
+                <span class="tracking-overlay-icon" aria-hidden="true">🌑</span>
+                <p class="tracking-overlay-title">Lights OFF</p>
+                <small class="tracking-overlay-hint">Spread hands to wake</small>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Status Card -->
+        <div class="card" id="card-status">
+          <div class="card-header">
+            <span class="card-icon" aria-hidden="true">📡</span>
+            <h2 class="card-title">Status</h2>
+          </div>
+          <div class="status-grid" role="list">
+            <div class="status-row" role="listitem">
+              <span class="status-label">Connection</span>
+              <span id="status-connection" class="status-value status-value--connecting">Connecting…</span>
+            </div>
+            <div class="status-row" role="listitem">
+              <span class="status-label">Transport</span>
+              <span id="status-transport" class="status-value status-value--neutral">—</span>
+            </div>
+            <div class="status-row" role="listitem">
+              <span class="status-label">Tracking</span>
+              <span id="status-tracking" class="status-value status-value--neutral">Starting…</span>
+            </div>
+            <div class="status-row" role="listitem">
+              <span class="status-label">Gesture</span>
+              <span id="status-gesture" class="status-value status-value--neutral">—</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Gesture Guide Card -->
+        <div class="card" id="card-gestures">
+          <div class="card-header">
+            <span class="card-icon" aria-hidden="true">✋</span>
+            <h2 class="card-title">Gesture Guide</h2>
+          </div>
+          <ul class="gesture-list" role="list">
+            <li class="gesture-item">
+              <span class="gesture-icon" aria-hidden="true">↔️</span>
+              <div class="gesture-info">
+                <span class="gesture-name">Spread hands apart</span>
+                <span class="gesture-desc">Increase brightness</span>
+              </div>
+            </li>
+            <li class="gesture-item">
+              <span class="gesture-icon" aria-hidden="true">🤲</span>
+              <div class="gesture-info">
+                <span class="gesture-name">Bring hands together</span>
+                <span class="gesture-desc">Decrease brightness</span>
+              </div>
+            </li>
+            <li class="gesture-item">
+              <span class="gesture-icon" aria-hidden="true">🙌</span>
+              <div class="gesture-info">
+                <span class="gesture-name">Hold together (0.3 s)</span>
+                <span class="gesture-desc">Turn lights OFF</span>
+              </div>
+            </li>
+            <li class="gesture-item">
+              <span class="gesture-icon" aria-hidden="true">🤚</span>
+              <div class="gesture-info">
+                <span class="gesture-name">Spread apart (after OFF)</span>
+                <span class="gesture-desc">Wake &amp; resume</span>
+              </div>
+            </li>
+          </ul>
+        </div>
+
+      </div><!-- /.column--left -->
+
+      <!-- ── RIGHT COLUMN ─────────────────────────────── -->
+      <div class="column column--right">
+
+        <!-- Brightness Card -->
+        <div class="card card--brightness" id="card-brightness">
+          <div class="card-header">
+            <span class="card-icon" aria-hidden="true">🔆</span>
+            <h2 class="card-title">Brightness</h2>
+          </div>
+
+          <div class="brightness-display">
+            <!-- SVG arc gauge -->
+            <div class="brightness-gauge-wrapper" role="img" aria-label="Brightness gauge">
+              <svg
+                class="brightness-gauge"
+                viewBox="0 0 200 200"
+                xmlns="http://www.w3.org/2000/svg"
+                aria-hidden="true"
+              >
+                <!-- Background track arc (270° sweep starting from bottom-left) -->
+                <circle
+                  class="gauge-track"
+                  cx="100" cy="100" r="80"
+                  fill="none"
+                  stroke-width="10"
+                  stroke-linecap="round"
+                  stroke-dasharray="440 502"
+                  stroke-dashoffset="-31"
+                  transform="rotate(135 100 100)"
+                />
+                <!-- Value fill arc -->
+                <circle
+                  id="gauge-fill"
+                  class="gauge-fill"
+                  cx="100" cy="100" r="80"
+                  fill="none"
+                  stroke-width="10"
+                  stroke-linecap="round"
+                  stroke-dasharray="0 502"
+                  stroke-dashoffset="-31"
+                  transform="rotate(135 100 100)"
+                />
+              </svg>
+
+              <div class="gauge-center">
+                <span
+                  id="brightness-percent"
+                  class="brightness-value"
+                  aria-live="polite"
+                  aria-label="Current brightness percentage"
+                >—</span>
+                <span class="brightness-unit" id="brightness-unit">%</span>
+              </div>
+            </div>
+
+            <div class="brightness-meta">
+              <div class="brightness-meta-item">
+                <span class="brightness-meta-label">ESP32 Value</span>
+                <span id="brightness-raw-value" class="brightness-meta-value">—</span>
+              </div>
+              <div class="brightness-meta-item">
+                <span class="brightness-meta-label">Hand Distance</span>
+                <span id="brightness-distance" class="brightness-meta-value">—</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Device Card -->
+        <div class="card" id="card-device">
+          <div class="card-header">
+            <span class="card-icon" aria-hidden="true">📱</span>
+            <h2 class="card-title">Device</h2>
+          </div>
+          <div class="device-form">
+            <div class="form-group">
+              <label class="form-label" for="device-ip">ESP32 IP Address</label>
+              <div class="input-row">
+                <input
+                  type="text"
+                  id="device-ip"
+                  class="form-input"
+                  placeholder="192.168.1.23"
+                  autocomplete="off"
+                  spellcheck="false"
+                  inputmode="url"
+                  aria-describedby="device-feedback"
+                />
+                <button id="device-save-btn" class="btn btn--primary">Save</button>
+              </div>
+            </div>
+            <div id="device-feedback" class="form-feedback hidden" role="alert" aria-live="polite"></div>
+          </div>
+        </div>
+
+        <!-- Camera Selection Card -->
+        <div class="card" id="card-camera-select">
+          <div class="card-header">
+            <span class="card-icon" aria-hidden="true">🎥</span>
+            <h2 class="card-title">Camera Source</h2>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="camera-select">Select Camera</label>
+            <select id="camera-select" class="form-select" aria-label="Select camera device">
+              <option value="">Detecting cameras…</option>
+            </select>
+          </div>
+        </div>
+
+      </div><!-- /.column--right -->
+
+    </main><!-- /.app-main -->
+
+    <!-- ── DEBUG PANEL ──────────────────────────────────
+         Hidden by default. Enable with ?debug=true in URL.
+    ─────────────────────────────────────────────────────── -->
+    <section id="debug-panel" class="debug-panel hidden" aria-label="Debug information">
+      <div class="debug-header">
+        <span class="debug-title">🐛 Debug Mode</span>
+        <span class="debug-hint">Active — url?debug=true</span>
+      </div>
+      <div class="debug-grid">
+        <div class="debug-item">
+          <span class="debug-label">FPS</span>
+          <span id="debug-fps" class="debug-value">—</span>
+        </div>
+        <div class="debug-item">
+          <span class="debug-label">Hand Confidence</span>
+          <span id="debug-hand-confidence" class="debug-value">—</span>
+        </div>
+        <div class="debug-item">
+          <span class="debug-label">Shoulder Width</span>
+          <span id="debug-shoulder-width" class="debug-value">—</span>
+        </div>
+        <div class="debug-item">
+          <span class="debug-label">Raw Hand Distance</span>
+          <span id="debug-raw-distance" class="debug-value">—</span>
+        </div>
+        <div class="debug-item">
+          <span class="debug-label">Normalized Distance</span>
+          <span id="debug-norm-distance" class="debug-value">—</span>
+        </div>
+        <div class="debug-item">
+          <span class="debug-label">Brightness (0–255)</span>
+          <span id="debug-brightness" class="debug-value">—</span>
+        </div>
+        <div class="debug-item">
+          <span class="debug-label">WS Latency</span>
+          <span id="debug-ws-latency" class="debug-value">—</span>
+        </div>
+        <div class="debug-item">
+          <span class="debug-label">Connection Mode</span>
+          <span id="debug-conn-mode" class="debug-value">—</span>
+        </div>
+        <div class="debug-item">
+          <span class="debug-label">Gesture State</span>
+          <span id="debug-gesture-state" class="debug-value">—</span>
+        </div>
+        <div class="debug-item">
+          <span class="debug-label">Frame Count</span>
+          <span id="debug-frame-count" class="debug-value">—</span>
+        </div>
+      </div>
+    </section>
+
+    <footer class="app-footer">
+      <p>GestureLight &nbsp;·&nbsp; MediaPipe Tasks Vision &nbsp;·&nbsp; ESP32 WebSocket</p>
+    </footer>
+
+  </div><!-- /#app -->
+
+  <!-- Application entry point (ES module) -->
+  <script type="module" src="src/app/App.js"></script>
+
+</body>
+</html>

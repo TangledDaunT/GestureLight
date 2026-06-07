@@ -1,0 +1,15 @@
+{
+  "name": "gesturelight",
+  "version": "1.0.0",
+  "description": "Browser-based gesture-controlled LED lighting via MediaPipe hand tracking and ESP32 WebSocket.",
+  "private": true,
+  "scripts": {
+    "dev":   "npx serve . --listen 8080 --no-clipboard",
+    "start": "npx serve . --listen 8080 --no-clipboard"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": ["mediapipe", "esp32", "gestures", "led", "hand-tracking"],
+  "license": "MIT"
+}
